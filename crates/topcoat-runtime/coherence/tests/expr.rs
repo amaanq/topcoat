@@ -1,5 +1,5 @@
 use serde::Serialize;
-use topcoat::runtime::{Expr, Js, Surrogated, expr};
+use topcoat::runtime::{Expr, Js, JsTemplate, Surrogated, expr};
 use topcoat_runtime_coherence::{Case, Observe};
 
 #[test]
@@ -32,22 +32,22 @@ fn nested_expressions_inline_values_and_preserve_scope() {
 
 #[test]
 fn captured_javascript_runs_at_each_use_inside_a_handler() {
-    let current = expr!(raw!("cx.hydrate(globalThis.current)", false));
-    let handler = expr!(|| if current { "selected" } else { "other" });
-    let (_, js) = handler.into_evaluated_and_js();
-    let source = format!(
-        "(() => {{
+    static CALL_TWICE: JsTemplate = JsTemplate::new(
+        "(cx, holes) => {
             globalThis.current = false;
-            const handler = {};
+            const handler = holes[0]();
             const first = handler().toString();
             globalThis.current = true;
             return cx.hydrate(first + ',' + handler().toString());
-        }})()",
-        js.to_source(),
+        }",
     );
+
+    let current = expr!(raw!("cx.hydrate(globalThis.current)", false));
+    let handler = expr!(|| if current { "selected" } else { "other" });
+    let (_, js) = handler.into_evaluated_and_js();
     Case::evaluated(
         "handler sees current captured value",
-        Expr::evaluate(|| "other,selected", Js::source(source)),
+        Expr::evaluate(|| "other,selected", Js::template(&CALL_TWICE, vec![js])),
     )
     .check()
     .unwrap();

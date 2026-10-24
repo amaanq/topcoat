@@ -13,7 +13,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{Body, Route, Router, request::IDENTITY_HEADER, response::Response, to_bytes},
-    runtime::{Signal, shard, signal},
+    runtime::{JsModule, Signal, shard, signal},
     view::{View, ViewExt, component, emit, live, view},
 };
 
@@ -327,7 +327,7 @@ async fn a_static_argument_keeps_its_javascript_for_rerenders() {
     let (_, identity) = scope_marker(&inline);
 
     assert!(
-        inline.contains("cx.hydrate(&quot;constant&quot;)"),
+        inline.contains("{&quot;v&quot;:&quot;constant&quot;}"),
         "{inline}"
     );
     assert!(inline.contains("<p>constant "), "{inline}");
@@ -347,7 +347,12 @@ async fn fixed_and_reactive_arguments_render_together() {
     let (_, identity) = scope_marker(&inline);
 
     assert!(inline.contains("<p>shoes 20</p>"), "{inline}");
-    assert!(inline.contains(".get()"), "{inline}");
+    let reactive = JsModule::registered()
+        .templates()
+        .iter()
+        .find(|template| inline.contains(template.id()))
+        .expect(&inline);
+    assert!(reactive.source().contains(".get()"), "{inline}");
     assert!(inline.contains("&quot;v&quot;:&quot;20&quot;"), "{inline}");
 
     let args = format!(

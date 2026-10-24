@@ -1,91 +1,111 @@
-use std::borrow::Cow;
+use std::fmt;
 
 use serde::Serialize;
-use topcoat_core::context::Cx;
+use topcoat_core::{context::Cx, fnv1a::Fnv1a};
 use topcoat_view::{AttributeValueViewParts, PartsWriter};
 
-/// JavaScript source and captured values for a runtime expression.
+/// JavaScript for a runtime expression, as data the browser runtime evaluates.
 ///
-/// Captured Rust values are serialized into the source. Embedding it in a
-/// view escapes it for the surrounding HTML context.
+/// A `Js` is either a [`JsTemplate`] applied to holes, which are themselves
+/// `Js`, or a captured Rust value serialized as JSON. Its [`Display`](fmt::Display) form is
+/// the JSON the browser receives: a template renders as `["<id>", hole, ...]`
+/// and a captured value as `{"v": <json>}`. The browser looks templates up by
+/// id in the module served from [`JsModule`](crate::JsModule), so pages never
+/// carry executable source.
+///
+/// Embedding a `Js` in a view escapes it for the surrounding HTML context.
 #[derive(Debug, Clone)]
-pub struct Js {
-    parts: Vec<JsPart>,
-}
+pub struct Js(JsNode);
 
 #[derive(Debug, Clone)]
-enum JsPart {
-    /// Source text, escaped for the position it renders in.
-    Source(Cow<'static, str>),
-    /// Trusted scaffolding written verbatim, like the `const [..] = [..]`
-    /// wrapper around captured values.
-    Raw(&'static str),
-    /// A captured value as JSON, hydrated on the client.
+enum JsNode {
+    Template {
+        template: &'static JsTemplate,
+        holes: Vec<Js>,
+    },
     Surrogate(String),
 }
 
 impl Js {
-    /// Source without captured values.
-    #[must_use]
-    pub fn source(js: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            parts: vec![JsPart::Source(js.into())],
-        }
-    }
-
-    /// Starts source that interleaves captured values.
-    #[must_use]
-    pub fn builder() -> JsBuilder {
-        JsBuilder { parts: Vec::new() }
-    }
-
-    /// Returns executable JavaScript, including serialized captured values.
+    /// Applies `template` to `holes`.
     ///
-    /// The source expects the runtime context to be available as `cx`. It is
-    /// not escaped for embedding in HTML.
+    /// The browser passes the holes to the template as functions, in order.
+    /// Each call evaluates its hole again. The browser only finds templates
+    /// registered with [`js_template!`](crate::js_template).
+    #[doc(hidden)]
     #[must_use]
-    pub fn to_source(&self) -> String {
-        let mut source = String::new();
-        for part in &self.parts {
-            match part {
-                JsPart::Source(js) => source.push_str(js),
-                JsPart::Raw(js) => source.push_str(js),
-                JsPart::Surrogate(json) => {
-                    source.push_str("cx.hydrate(");
-                    source.push_str(json);
-                    source.push(')');
-                }
+    pub fn template(template: &'static JsTemplate, holes: Vec<Self>) -> Self {
+        Self(JsNode::Template { template, holes })
+    }
+
+    /// A captured value, serialized now so the Rust expression can consume it
+    /// afterwards. The browser hydrates it each time it is evaluated.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value fails to serialize.
+    #[must_use]
+    pub fn surrogate(value: &(impl Serialize + ?Sized)) -> Self {
+        let json = serde_json::to_string(value).expect("failed to serialize surrogate value");
+        Self(JsNode::Surrogate(json))
+    }
+
+    /// Returns every template this expression applies, including those of
+    /// its holes.
+    #[must_use]
+    pub fn templates(&self) -> Vec<&'static JsTemplate> {
+        let mut templates = Vec::new();
+        let mut pending = vec![self];
+        while let Some(js) = pending.pop() {
+            if let JsNode::Template { template, holes } = &js.0 {
+                templates.push(*template);
+                pending.extend(holes);
             }
         }
-        source
+        templates
     }
 
-    /// Writes the source through `parts`, sealed for the writer's current
+    /// Writes the JSON through `parts`, sealed for the writer's current
     /// context: a marker comment's body or a double-quoted attribute value.
     pub(crate) fn write(&self, parts: &mut PartsWriter<'_>) {
-        for part in &self.parts {
-            match part {
-                JsPart::Source(Cow::Borrowed(js)) => {
-                    parts.push_static_str(js);
+        match &self.0 {
+            JsNode::Template { template, holes } => {
+                parts
+                    .push_promoted_str(&"[\"")
+                    .push_static_str(template.id())
+                    .push_promoted_str(&"\"");
+                for hole in holes {
+                    parts.push_promoted_str(&",");
+                    hole.write(parts);
                 }
-                JsPart::Source(Cow::Owned(js)) => {
-                    parts.push_str(js);
-                }
-                JsPart::Raw(js) => {
-                    parts.push_static_str_unescaped(js);
-                }
-                JsPart::Surrogate(json) => {
-                    parts
-                        .push_promoted_str_unescaped(&"cx.hydrate(")
-                        .push_str(json)
-                        .push_promoted_str_unescaped(&")");
-                }
+                parts.push_promoted_str(&"]");
+            }
+            JsNode::Surrogate(json) => {
+                parts
+                    .push_promoted_str(&"{\"v\":")
+                    .push_str(json)
+                    .push_promoted_str(&"}");
             }
         }
     }
 }
 
-/// The source as the value of a `data-topcoat-*` attribute, like an event
+impl fmt::Display for Js {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            JsNode::Template { template, holes } => {
+                write!(f, "[\"{}\"", template.id())?;
+                for hole in holes {
+                    write!(f, ",{hole}")?;
+                }
+                f.write_str("]")
+            }
+            JsNode::Surrogate(json) => write!(f, "{{\"v\":{json}}}"),
+        }
+    }
+}
+
+/// The JSON as the value of a `data-topcoat-*` attribute, like an event
 /// handler or a bind expression.
 impl AttributeValueViewParts for Js {
     #[inline]
@@ -99,71 +119,102 @@ impl AttributeValueViewParts for Js {
     }
 }
 
-/// Builds a [`Js`] from source and captured values, in order.
+/// JavaScript source for an expression, known when the program is compiled.
+///
+/// Create and register one with [`js_template!`](crate::js_template). The
+/// browser only runs templates included in its [`JsModule`](crate::JsModule).
 #[derive(Debug)]
-pub struct JsBuilder {
-    parts: Vec<JsPart>,
+pub struct JsTemplate {
+    id: [u8; 16],
+    source: &'static str,
 }
 
-impl JsBuilder {
-    /// Appends an expression in parentheses, preserving its captured values.
-    #[must_use]
-    pub fn expression<T>(mut self, expression: &crate::Expr<T>) -> Self {
-        self.parts.push(JsPart::Raw("("));
-        self.parts.extend(expression.js.parts.iter().cloned());
-        self.parts.push(JsPart::Raw(")"));
-        self
-    }
-
-    /// Appends source text.
-    #[must_use]
-    pub fn source(mut self, js: impl Into<Cow<'static, str>>) -> Self {
-        self.parts.push(JsPart::Source(js.into()));
-        self
-    }
-
-    /// Appends trusted scaffolding, written verbatim.
-    #[must_use]
-    pub fn raw(mut self, js: &'static str) -> Self {
-        self.parts.push(JsPart::Raw(js));
-        self
-    }
-
-    /// Appends a captured value, serialized now so the Rust expression can
-    /// consume it afterwards.
+impl JsTemplate {
+    /// Creates a template with an id derived from its source.
     ///
-    /// # Panics
-    ///
-    /// Panics if the value fails to serialize.
+    /// The template is not registered. Use [`js_template!`](crate::js_template)
+    /// to create one the browser can find.
+    #[doc(hidden)]
     #[must_use]
-    pub fn surrogate(mut self, value: &(impl Serialize + ?Sized)) -> Self {
-        let json = serde_json::to_string(value).expect("failed to serialize surrogate value");
-        self.parts.push(JsPart::Surrogate(json));
-        self
+    pub const fn new(source: &'static str) -> Self {
+        const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+        let hash = Fnv1a::<u64>::new().write(source.as_bytes()).finish();
+        let mut id = [0; 16];
+        let mut digit = 0;
+        while digit < id.len() {
+            id[digit] = DIGITS[((hash >> (60 - 4 * digit)) & 0xf) as usize];
+            digit += 1;
+        }
+        Self { id, source }
     }
 
-    /// Finishes the builder into a [`Js`].
+    /// The id the browser looks this template up by.
     #[must_use]
-    pub fn build(self) -> Js {
-        Js { parts: self.parts }
+    pub fn id(&self) -> &str {
+        match str::from_utf8(&self.id) {
+            Ok(id) => id,
+            Err(_) => unreachable!("template ids are hexadecimal"),
+        }
     }
+
+    /// The template's JavaScript source.
+    #[must_use]
+    pub fn source(&self) -> &'static str {
+        self.source
+    }
+}
+
+inventory::collect!(&'static JsTemplate);
+
+/// Registers a [`JsTemplate`] with the [`JsModule`] of this binary and
+/// returns the [`Js`] that applies it to the given holes.
+///
+/// The source must be a string literal, or another constant `&'static str`,
+/// holding a JavaScript function expression. The browser runtime calls it
+/// with its context, conventionally named `cx`, and an array of functions
+/// that evaluate the holes. Each call evaluates its hole again.
+///
+/// ```rust
+/// use topcoat::runtime::{Expr, JsModule, js_template};
+///
+/// let js = js_template!("(cx, holes) => !holes[0]()", Expr::from(true).js().clone());
+/// let negated = Expr::evaluate(|| false, js);
+///
+/// let id = negated.js().templates()[0].id();
+/// assert!(
+///     JsModule::registered()
+///         .templates()
+///         .iter()
+///         .any(|t| t.id() == id)
+/// );
+/// ```
+///
+/// [`JsModule`]: crate::JsModule
+#[macro_export]
+macro_rules! js_template {
+    ($source:expr $(, $hole:expr)* $(,)?) => {{
+        static TEMPLATE: $crate::JsTemplate = $crate::JsTemplate::new($source);
+        $crate::internal::inventory::submit! { &TEMPLATE }
+        $crate::Js::template(&TEMPLATE, ::std::vec![$($hole),*])
+    }};
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    static TEMPLATE: JsTemplate = JsTemplate::new("(cx, holes) => holes[0]()");
+
     #[test]
-    fn executable_source_preserves_javascript_and_capture_escaping() {
-        let js = Js::builder()
-            .raw("(() => { const value = ")
-            .surrogate(&"\"<>&\n")
-            .source("; return value; })()")
-            .build();
+    fn display_nests_holes_and_keeps_captured_json() {
+        let inner = Js::template(&TEMPLATE, vec![Js::surrogate("\"<>&\n")]);
+        let js = Js::template(&TEMPLATE, vec![inner]);
+        let id = TEMPLATE.id();
 
         assert_eq!(
-            js.to_source(),
-            r#"(() => { const value = cx.hydrate("\"<>&\n"); return value; })()"#,
+            js.to_string(),
+            format!(r#"["{id}",["{id}",{{"v":"\"<>&\n"}}]]"#),
         );
     }
 }

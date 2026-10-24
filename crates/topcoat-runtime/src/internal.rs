@@ -1,5 +1,6 @@
 //! Support for the code that runtime macros generate.
 
+pub use inventory;
 pub use serde;
 
 use crate::{deserialize_tagged, serialize_tagged};

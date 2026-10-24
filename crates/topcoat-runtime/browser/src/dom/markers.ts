@@ -47,14 +47,13 @@ export type CommentMarker =
 const SIGNAL_RE = /^\s*::topcoat::signal\(([\s\S]*)\)\s*$/;
 const DEP_RE = /^\s*::topcoat::dep\("([0-9a-f]+)"\)\s*$/;
 const CONNECT_RE = /^\s*::topcoat::connect\s*$/;
-const EXPR_START_RE = /^\s*::topcoat::expr::start\("([^"]*)"\)\s*$/;
+const EXPR_START_RE = /^\s*::topcoat::expr::start\(([\s\S]*)\)\s*$/;
 const EXPR_END_RE = /^\s*::topcoat::expr::end\s*$/;
 const REGION_START_RE = /^\s*::topcoat::region::start\(([0-9a-f]+)\)\s*$/;
 const REGION_END_RE = /^\s*::topcoat::region::end\(([0-9a-f]+)\)\s*$/;
 const SHARD_START_RE =
 	/^\s*::topcoat::shard::start\(("[^"]*"), ("[^"]*"), (\[[\s\S]*\])\)\s*$/;
 const SHARD_END_RE = /^\s*::topcoat::shard::end\(("[^"]+")\)\s*$/;
-const QUOTED_RE = /"([^"]*)"/g;
 
 export function parseComment(node: Comment): CommentMarker | null {
 	const text = node.data;
@@ -112,18 +111,13 @@ export function parseComment(node: Comment): CommentMarker | null {
 
 	const start = SHARD_START_RE.exec(text);
 	if (start) {
-		const exprs: string[] = [];
-		QUOTED_RE.lastIndex = 0;
-		let m: RegExpExecArray | null = QUOTED_RE.exec(start[3] ?? "");
-		while (m !== null) {
-			exprs.push(decodeHtml(m[1] ?? ""));
-			m = QUOTED_RE.exec(start[3] ?? "");
-		}
+		const exprs: unknown = JSON.parse(decodeHtml(start[3] ?? ""));
+		if (!Array.isArray(exprs)) throw new Error("Invalid shard marker");
 		return {
 			kind: "shard-start",
 			path: JSON.parse(start[1] ?? "") as string,
 			identity: JSON.parse(start[2] ?? "") as string,
-			exprs,
+			exprs: exprs.map((expr) => JSON.stringify(expr)),
 		};
 	}
 

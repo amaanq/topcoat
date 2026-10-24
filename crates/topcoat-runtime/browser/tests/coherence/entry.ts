@@ -1,4 +1,9 @@
-import type { Context } from "../../src/expression/context";
+import {
+	compile as compileExpression,
+	defineTemplates,
+	type Expression,
+	type Template,
+} from "../../src/expression/compile";
 import { SignalRegistry } from "../../src/signal-registry";
 import { Panic } from "../../src/surrogate/panic";
 import { FixtureContext } from "./fixture";
@@ -6,10 +11,17 @@ import { observe } from "./observe";
 
 export { setServerUsizeBits } from "../../src/surrogate/integer";
 
-/** Executes production-generated source in an independent runtime context. */
-export function execute(source: string, invoke: boolean): string {
+/**
+ * Executes production-generated JSON against the definitions of a template
+ * module in an independent runtime context.
+ */
+export function execute(
+	definitions: string,
+	json: string,
+	invoke: boolean,
+): string {
 	const cx = new FixtureContext(new SignalRegistry());
-	const compute = compile(source);
+	const compute = compile(definitions, json);
 	if (typeof compute === "string") return compute;
 	let value: unknown;
 	try {
@@ -33,9 +45,12 @@ export function execute(source: string, invoke: boolean): string {
 }
 
 /** Invokes an async closure and observes its completed value. */
-export async function executeAsync(source: string): Promise<string> {
+export async function executeAsync(
+	definitions: string,
+	json: string,
+): Promise<string> {
 	const cx = new FixtureContext(new SignalRegistry());
-	const compute = compile(source);
+	const compute = compile(definitions, json);
 	if (typeof compute === "string") return compute;
 	let value: unknown;
 	try {
@@ -60,15 +75,19 @@ export async function executeAsync(source: string): Promise<string> {
 	return JSON.stringify({ kind: "Return", value: observe(value) });
 }
 
-function compile(source: string): ((cx: Context) => unknown) | string {
+/** Loads the module's definitions as a page would, then resolves the JSON. */
+function compile(definitions: string, json: string): Expression | string {
+	let templates: { [id: string]: Template };
 	try {
-		return new Function("cx", `return (${source});`) as (
-			cx: Context,
-		) => unknown;
+		templates = new Function(`return ${definitions};`)() as {
+			[id: string]: Template;
+		};
 	} catch (error) {
 		if (error instanceof SyntaxError) {
 			return JSON.stringify({ kind: "CompileError", value: error.toString() });
 		}
 		throw error;
 	}
+	defineTemplates(templates);
+	return compileExpression(json, "coherence case");
 }

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, expect, it, vi } from "vitest";
+import { js } from "../../tests/expression";
 import { flushEffects } from "../reactivity";
 import { newRender } from "../render/frames";
 import { Runtime } from "../runtime";
@@ -150,9 +151,9 @@ it("hydrates signal references using the runtime registry", () => {
 it("updates bindings and text after events, then stops both on disposal", async () => {
 	document.body.innerHTML = `
 		<!--::topcoat::signal({"t":"signal","id":"a","v":1})-->
-		<button data-topcoat-on:click="() => cx.signal('a').increment()">add</button>
-		<input data-topcoat-bind:value="cx.signal('a').get()">
-		<p><!--::topcoat::expr::start("cx.signal('a').get()")-->1<!--::topcoat::expr::end--></p>
+		<button data-topcoat-on:click="${js(`() => cx.signal('a').increment()`)}">add</button>
+		<input data-topcoat-bind:value="${js(`cx.signal('a').get()`)}">
+		<p><!--::topcoat::expr::start(${js(`cx.signal('a').get()`)})-->1<!--::topcoat::expr::end--></p>
 	`;
 	const runtime = new Runtime();
 	try {
@@ -189,7 +190,7 @@ it("updates bindings and text after events, then stops both on disposal", async 
 it("keeps the server's text node on initial hydration", () => {
 	document.body.innerHTML = `
 		<!--::topcoat::signal({"t":"signal","id":"a","v":1})-->
-		<p><!--::topcoat::expr::start("cx.signal('a').get()")-->1<!--::topcoat::expr::end--></p>
+		<p><!--::topcoat::expr::start(${js(`cx.signal('a').get()`)})-->1<!--::topcoat::expr::end--></p>
 	`;
 	const paragraph = document.querySelector("p");
 	const serverText = paragraph?.childNodes[1];
@@ -212,8 +213,8 @@ it.each([
 	"live region",
 ])("reconciles text with retained signals when replacing a %s", (kind) => {
 	const text = `
-			<p><!--::topcoat::expr::start("cx.signal('a').get()")-->1<!--::topcoat::expr::end--></p>
-			<button data-topcoat-on:click="() => cx.signal('a').increment()">add</button>
+			<p><!--::topcoat::expr::start(${js(`cx.signal('a').get()`)})-->1<!--::topcoat::expr::end--></p>
+			<button data-topcoat-on:click="${js(`() => cx.signal('a').increment()`)}">add</button>
 		`;
 	const html = `
 			<!--::topcoat::signal({"t":"signal","id":"a","v":1})-->
@@ -319,8 +320,8 @@ it("keeps checkbox signals in sync through repeated clicks", () => {
 	document.body.innerHTML = `
 		<!--::topcoat::signal({"t":"signal","id":"checked","v":false})-->
 		<input type="checkbox"
-			data-topcoat-bind:checked="cx.signal('checked').get()"
-			data-topcoat-on:change="e => cx.signal('checked').set(e.target.checked)">
+			data-topcoat-bind:checked="${js(`cx.signal('checked').get()`)}"
+			data-topcoat-on:change="${js(`e => cx.signal('checked').set(e.target.checked)`)}">
 	`;
 	const runtime = new Runtime();
 	try {
@@ -350,8 +351,8 @@ it("selects only the radio matching the signal after each click", () => {
 			.map(
 				(value) => `
 			<input type="radio" name="range" value="${value}"
-				data-topcoat-bind:checked="cx.signal('range').get().eq(cx.hydrate('${value}'))"
-				data-topcoat-on:change="e => cx.signal('range').set(e.target.value)">
+				data-topcoat-bind:checked="${js(`cx.signal('range').get().eq(cx.hydrate('${value}'))`)}"
+				data-topcoat-on:change="${js(`e => cx.signal('range').set(e.target.value)`)}">
 		`,
 			)
 			.join("")}
@@ -377,7 +378,7 @@ it("selects only the radio matching the signal after each click", () => {
 it("clears the live input value and removes its attribute for an absent value", () => {
 	document.body.innerHTML = `
 		<!--::topcoat::signal({"t":"signal","id":"value","v":{"t":"Option","v":"initial"}})-->
-		<input value="initial" data-topcoat-bind:value="cx.signal('value').get()">
+		<input value="initial" data-topcoat-bind:value="${js(`cx.signal('value').get()`)}">
 	`;
 	const runtime = new Runtime();
 	try {

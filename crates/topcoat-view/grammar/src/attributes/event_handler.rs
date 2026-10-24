@@ -4,6 +4,7 @@ use syn::{
     LitStr, Token,
     parse::{Parse, ParseStream},
 };
+use topcoat_core::fnv1a::Fnv1a;
 use topcoat_core_grammar::{ParseOption, paths::topcoat_runtime};
 
 use crate::{
@@ -21,6 +22,23 @@ use crate::{
 pub enum EventHandlerValue {
     Expr(Box<TemplateOrRuntimeExpr>),
     LitStr(LitStr),
+}
+
+impl EventHandlerValue {
+    /// The template source for a string literal's JavaScript.
+    fn lit_str_source(value: &LitStr) -> LitStr {
+        LitStr::new(
+            &format!("(cx, __holes) => ({})", value.value()),
+            value.span(),
+        )
+    }
+
+    /// Registers a string literal's JavaScript as a template and returns the
+    /// `Js` that applies it.
+    fn lit_str_js(value: &LitStr) -> TokenStream {
+        let source = Self::lit_str_source(value);
+        quote! { #topcoat_runtime::js_template!(#source) }
+    }
 }
 
 impl Parse for EventHandlerValue {
@@ -69,10 +87,23 @@ impl LowerView for EventHandler {
         let value = &self.value;
         match value {
             EventHandlerValue::LitStr(value) => {
+                // `JsTemplate::new` derives the same id, so the attribute
+                // renders as static text.
+                let source = EventHandlerValue::lit_str_source(value);
+                let id = Fnv1a::<u64>::new()
+                    .write(source.value().as_bytes())
+                    .finish();
+                builder.statement(quote! {
+                    const _: () = {
+                        static TEMPLATE: #topcoat_runtime::JsTemplate =
+                            #topcoat_runtime::JsTemplate::new(#source);
+                        #topcoat_runtime::internal::inventory::submit! { &TEMPLATE }
+                    };
+                });
                 builder.str_unescaped("data-topcoat-on:");
                 key.lower(builder);
                 builder.str_unescaped("=\"");
-                builder.attribute_value(&value.value());
+                builder.attribute_value(&format!("[\"{id:016x}\"]"));
                 builder.str_unescaped("\"");
             }
             EventHandlerValue::Expr(value) => {
@@ -95,12 +126,13 @@ impl LowerAttribute for EventHandler {
         let key = &self.key;
         match &self.value {
             EventHandlerValue::LitStr(value) => {
+                let js = EventHandlerValue::lit_str_js(value);
                 builder.insert_block(
                     1,
                     quote! {
                         {
                             let __key = ::core::convert::Into::<::std::string::String>::into(#key);
-                            __attrs.insert(__cx, ::std::format!("data-topcoat-on:{}", __key), #value);
+                            __attrs.insert(__cx, ::std::format!("data-topcoat-on:{}", __key), #js);
                         }
                     },
                 );

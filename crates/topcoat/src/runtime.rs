@@ -3,7 +3,8 @@
 pub use topcoat_runtime::*;
 pub use topcoat_runtime_macro::*;
 
-/// The `<script>` tag loading the browser runtime.
+/// The `<script>` tags loading the browser runtime and the [`JsModule`] of
+/// expression templates it evaluates.
 ///
 /// # Panics
 ///
@@ -17,6 +18,11 @@ pub async fn script(cx: &topcoat::context::Cx) -> topcoat::Result<impl topcoat::
         "the browser runtime is not set up on this router; call `.runtime()` on the router builder",
     );
     Ok(topcoat::view::view! {
+        <script
+            type="module"
+            src=(topcoat::runtime::JsModule::registered().path())
+            data-topcoat-expressions=""
+        ></script>
         <script
             type="module"
             src=(topcoat::runtime::SCRIPT)

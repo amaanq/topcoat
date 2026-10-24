@@ -8,6 +8,7 @@ mod expr;
 #[doc(hidden)]
 pub mod internal;
 mod js;
+mod js_module;
 #[cfg(feature = "router")]
 mod layer;
 #[path = "link.rs"]
@@ -28,6 +29,7 @@ pub use connection::*;
 pub use event_handler::*;
 pub use expr::*;
 pub use js::*;
+pub use js_module::*;
 #[cfg(feature = "router")]
 pub use layer::*;
 pub use link_::*;

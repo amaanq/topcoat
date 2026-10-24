@@ -6,7 +6,7 @@ Use [`link`](struct.link.html) for navigation without a full document reload, wi
 
 # Setup
 
-Interactive pages need the runtime's browser script. `script()` renders the script tag; include it in your document head:
+Interactive pages need the runtime's browser script. `script()` renders its script tags; include them in your document head:
 
 ```rust
 # use topcoat::{Result, view::*};
@@ -42,6 +42,8 @@ pub fn router() -> Router {
 ```
 
 The runtime reruns a page by sending its current signal values to the page's URL. The [`RuntimeLayer`] added by `.runtime()` converts this request into a `GET`, so the page and its layouts can render with those values. Registering your layers first lets them handle the rerun as a `GET`. See [`RuntimeLayer`] for the request format and rewrite behavior.
+
+`.runtime()` also serves the JavaScript compiled from your expressions as a [`JsModule`] at a content-hashed path under `/_topcoat/runtime/`. Pages refer to that JavaScript by id and contain no executable source, so the runtime works under a Content Security Policy without `'unsafe-eval'`. Allow the origins that serve the module and the asset bundle in `script-src`, such as `'self'`. Every expression in the binary shares this module, so a JavaScript syntax error in any `raw!` or `@event="..."` string stops it from loading. The runtime still starts, but every expression on every page then fails, and the browser console shows the `SyntaxError` with its line and column in the module.
 
 `module_router!()` registers pages from the module tree. `.discover()` adds [procedures](#procedures) and [shards](#shards) from your application. To register a procedure or shard explicitly, pass its name to `.route()`.
 

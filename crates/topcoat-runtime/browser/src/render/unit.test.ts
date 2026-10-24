@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-
+import { js } from "../../tests/expression";
 import { flushEffects } from "../reactivity";
 import { Runtime } from "../runtime";
 import type { Scope } from "../scope";
@@ -153,7 +153,7 @@ it("a shard re-run morphs its content, keeping a focused input and the markers",
 
 it("a re-run attaches each event handler once", async () => {
 	const clicks = "globalThis.clicks = (globalThis.clicks ?? 0) + 1";
-	const button = `<button data-topcoat-on:click="() => { ${clicks}; }">go</button>`;
+	const button = `<button data-topcoat-on:click="${js(`() => { ${clicks}; }`)}">go</button>`;
 	stubFetch(200, "OK", snapshot(button));
 	const { fetchAndReplace } = mountShard(button);
 	const el = document.querySelector("button") as HTMLButtonElement;
@@ -251,7 +251,7 @@ it("a page re-run morphs the body, keeping a focused input", async () => {
 });
 
 it("a page re-run keeps an edited input unless a binding sets its value", async () => {
-	const body = `<input><input data-topcoat-bind:value="cx.hydrate('')"><button>sort</button>`;
+	const body = `<input><input data-topcoat-bind:value="${js(`cx.hydrate('')`)}"><button>sort</button>`;
 	stubFetch(
 		200,
 		"OK",
@@ -455,7 +455,7 @@ function mountRegion(outside: string, region: string) {
 }
 
 it("a swap replaces its region's content, rebuilding the region's resources and keeping its surviving signals", async () => {
-	const button = `<button data-topcoat-on:click="() => cx.signal('a').increment()">go</button>`;
+	const button = `<button data-topcoat-on:click="${js(`() => cx.signal('a').increment()`)}">go</button>`;
 	const runtime = mountRegion(
 		`<p>outside</p>`,
 		`${declaration("a", 0)}${declaration("b", 0)}${button}<p>one</p>`,

@@ -80,11 +80,8 @@ impl<V: View> View for ShardScope<'_, V> {
 ///
 /// The browser runtime posts re-render requests to the URL. The identity
 /// is stable across renders, so a re-render of the enclosing content
-/// produces the same markers and the browser can keep them. Each
-/// parameter's JavaScript source is wrapped in a quoted string. The source
-/// parts are sealed with the comment context, so any `"` inside the source
-/// renders as `&quot;` and the quotes stay unambiguous delimiters on the
-/// client.
+/// produces the same markers and the browser can keep them. The last
+/// argument lists each parameter's [`Js`], sealed with the comment context.
 struct StartMarker<'a> {
     url: &'static str,
     /// The identity as a JSON string, quotes included.
@@ -94,7 +91,7 @@ struct StartMarker<'a> {
 
 impl NodeViewParts for StartMarker<'_> {
     fn into_view_parts(self, _cx: &Cx, parts: &mut PartsWriter<'_>) {
-        // <!-- ::topcoat::shard::start("<url>", "<identity>", ["<js>", ...]) -->
+        // <!-- ::topcoat::shard::start("<url>", "<identity>", [<js>, ...]) -->
         parts.push_comment(|comment| {
             comment
                 .push_promoted_str_unescaped(&"::topcoat::shard::start(")
@@ -104,9 +101,7 @@ impl NodeViewParts for StartMarker<'_> {
                 .push_promoted_str_unescaped(&", [");
             let last = self.exprs.len().saturating_sub(1);
             for (index, expr) in self.exprs.iter().enumerate() {
-                comment.push_promoted_str_unescaped(&"\"");
                 expr.write(comment);
-                comment.push_promoted_str_unescaped(&"\"");
                 if index != last {
                     comment.push_promoted_str_unescaped(&", ");
                 }

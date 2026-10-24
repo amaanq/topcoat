@@ -14,6 +14,7 @@ rust-version.workspace = true
 pretty = ["topcoat-core-grammar/pretty"]
 
 [dependencies]
+topcoat-core.workspace = true
 topcoat-core-grammar.workspace = true
 topcoat-view.workspace = true
 

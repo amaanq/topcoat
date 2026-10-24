@@ -67,6 +67,13 @@ impl<T> Expr<T> {
         self
     }
 
+    /// Returns the JavaScript that produces this expression's value.
+    #[inline]
+    #[must_use]
+    pub fn js(&self) -> &Js {
+        &self.js
+    }
+
     /// Returns the value and its JavaScript, including for static expressions.
     #[inline]
     pub fn into_evaluated_and_js(self) -> (T, Js) {
@@ -98,7 +105,7 @@ where
     /// Panics if the value's surrogate cannot be serialized.
     fn from(value: T) -> Self {
         let surrogate = value.into_surrogate();
-        let js = Js::builder().surrogate(&surrogate).build();
+        let js = Js::surrogate(&surrogate);
         Self::evaluate(|| surrogate.into_real(), js)
     }
 }
@@ -113,15 +120,11 @@ where
             return;
         }
 
-        // <!-- ::topcoat::expr::start("<js>") -->
-        //
-        // The comment context seals the source, so a `"` inside it renders
-        // as `&quot;` and the quotes stay unambiguous delimiters on the
-        // client.
+        // <!-- ::topcoat::expr::start(<js>) -->
         parts.push_comment(|comment| {
-            comment.push_promoted_str_unescaped(&"::topcoat::expr::start(\"");
+            comment.push_promoted_str_unescaped(&"::topcoat::expr::start(");
             self.js.write(comment);
-            comment.push_promoted_str_unescaped(&"\")");
+            comment.push_promoted_str_unescaped(&")");
         });
         self.evaluated.into_view_parts(cx, parts);
         parts.push_comment(|comment| {
@@ -171,20 +174,27 @@ mod tests {
     use std::{panic::catch_unwind, sync::Barrier};
 
     use super::*;
+    use crate::JsTemplate;
+
+    static EMPTY: JsTemplate = JsTemplate::new("() => undefined");
+
+    fn empty() -> Js {
+        Js::template(&EMPTY, Vec::new())
+    }
 
     #[test]
     fn nested_evaluations_propagate_reads_without_contaminating_siblings() {
         let outer = Expr::evaluate(
             || {
-                let inner = Expr::evaluate(mark_signal_read, Js::source(""));
+                let inner = Expr::evaluate(mark_signal_read, empty());
                 assert!(!inner.is_static());
-                let sibling = Expr::evaluate(|| 1, Js::source(""));
+                let sibling = Expr::evaluate(|| 1, empty());
                 assert!(sibling.is_static());
             },
-            Js::source(""),
+            empty(),
         );
         assert!(!outer.is_static());
-        assert!(Expr::evaluate(|| 1, Js::source("")).is_static());
+        assert!(Expr::evaluate(|| 1, empty()).is_static());
     }
 
     #[test]
@@ -197,15 +207,15 @@ mod tests {
                             mark_signal_read();
                             panic!("evaluation failed");
                         },
-                        Js::source(""),
+                        empty(),
                     )
                 });
                 assert!(panic.is_err());
             },
-            Js::source(""),
+            empty(),
         );
         assert!(!outer.is_static());
-        assert!(Expr::evaluate(|| 1, Js::source("")).is_static());
+        assert!(Expr::evaluate(|| 1, empty()).is_static());
     }
 
     #[test]
@@ -219,7 +229,7 @@ mod tests {
                         barrier.wait();
                         barrier.wait();
                     },
-                    Js::source(""),
+                    empty(),
                 )
             });
             let constant = Expr::evaluate(
@@ -227,7 +237,7 @@ mod tests {
                     barrier.wait();
                     barrier.wait();
                 },
-                Js::source(""),
+                empty(),
             );
             assert!(constant.is_static());
             assert!(!dynamic.join().unwrap().is_static());

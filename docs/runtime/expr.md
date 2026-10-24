@@ -85,7 +85,7 @@ Unsupported syntax produces a compile error at the expression.
 
 # Embedding JavaScript
 
-Use `raw!` for JavaScript operations outside the supported vocabulary. Its first argument is JavaScript source. The optional second argument is equivalent Rust for server evaluation:
+Use `raw!` for JavaScript operations outside the supported vocabulary. Its first argument is JavaScript source, which Rust does not check; a syntax error in it stops every expression in the application from loading. The optional second argument is equivalent Rust for server evaluation:
 
 ```rust
 # use topcoat::{Result, context::Cx, runtime::signal, view::*};

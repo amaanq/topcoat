@@ -5552,6 +5552,7 @@ name = "topcoat-runtime"
 version = "0.10.0"
 dependencies = [
  "futures-util",
+ "inventory",
  "pin-project-lite",
  "ref-cast",
  "serde",
@@ -5679,6 +5680,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
+ "topcoat-core",
  "topcoat-core-grammar",
  "topcoat-view",
 ]

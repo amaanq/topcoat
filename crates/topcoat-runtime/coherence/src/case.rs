@@ -8,14 +8,14 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use topcoat::runtime::{Expr, Surrogate};
+use topcoat::runtime::{Expr, Js, JsModule, Surrogate};
 
 use crate::{Engine, Observe, Outcome};
 
 /// An expression and its Rust outcome, ready for comparison in JavaScript.
 pub struct Case {
     expression: &'static str,
-    source: String,
+    js: Js,
     rust: Outcome,
     invoke: bool,
     asynchronous: bool,
@@ -27,7 +27,7 @@ impl Case {
         let (value, js) = compiled.into_evaluated_and_js();
         Self {
             expression,
-            source: js.to_source(),
+            js,
             rust: Outcome::Return(value.observe()),
             invoke: false,
             asynchronous: false,
@@ -42,14 +42,13 @@ impl Case {
         S::Real: Observe,
     {
         let (run, js) = compiled.into_evaluated_and_js();
-        let source = js.to_source();
         let rust = match catch_unwind(AssertUnwindSafe(run)) {
             Ok(value) => Outcome::Return(value.into_real().observe()),
             Err(payload) => Self::panic_outcome(&*payload),
         };
         Self {
             expression,
-            source,
+            js,
             rust,
             invoke: true,
             asynchronous: false,
@@ -86,7 +85,6 @@ impl Case {
             "async coherence cases must run in synchronous tests"
         );
         let (run, js) = compiled.into_evaluated_and_js();
-        let source = js.to_source();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()?;
@@ -96,17 +94,23 @@ impl Case {
         let rust = match result {
             Ok(Ok(value)) => Outcome::Return(value.into_real().observe()),
             Ok(Err(_)) => bail!(
-                "Rust future exceeded {timeout:?}: {expression}\ngenerated JavaScript:\n{source}"
+                "Rust future exceeded {timeout:?}: {expression}\ngenerated JavaScript:\n{}",
+                Self::generated(&js),
             ),
             Err(payload) => Self::panic_outcome(&*payload),
         };
         Ok(Self {
             expression,
-            source,
+            js,
             rust,
             invoke: true,
             asynchronous: true,
         })
+    }
+
+    /// The template module and JSON the browser would receive.
+    fn generated(js: &Js) -> String {
+        format!("{}\n{js}", JsModule::new(js.templates()).definitions())
     }
 
     fn panic_outcome(payload: &(dyn Any + Send)) -> Outcome {
@@ -130,13 +134,13 @@ impl Case {
                 "expression: {}\nRust: {:#?}\nJavaScript: {javascript:#?}\ngenerated JavaScript:\n{}",
                 self.expression,
                 self.rust,
-                self.source,
+                Self::generated(&self.js),
             ),
             Err(error) => bail!(
                 "expression: {}\nRust: {:#?}\nJavaScript execution failed: {error:#}\ngenerated JavaScript:\n{}",
                 self.expression,
                 self.rust,
-                self.source,
+                Self::generated(&self.js),
             ),
         }
     }
@@ -146,11 +150,16 @@ impl Case {
             static ENGINE: RefCell<Engine> = RefCell::new(Engine::new(Duration::from_secs(5)));
         }
 
-        let source = serde_json::to_string(&self.source)?;
+        let module = JsModule::new(self.js.templates());
+        let definitions = serde_json::to_string(module.definitions())?;
+        let json = serde_json::to_string(&self.js.to_string())?;
         let call = if self.asynchronous {
-            format!("TopcoatCoherence.executeAsync({source})")
+            format!("TopcoatCoherence.executeAsync({definitions}, {json})")
         } else {
-            format!("TopcoatCoherence.execute({source}, {})", self.invoke)
+            format!(
+                "TopcoatCoherence.execute({definitions}, {json}, {})",
+                self.invoke
+            )
         };
         let script = format!(
             "{}\nTopcoatCoherence.setServerUsizeBits({});\n{call};",
@@ -186,7 +195,8 @@ impl Case {
         let javascript = self.javascript().with_context(|| {
             format!(
                 "known mismatch {id}: {}\ngenerated JavaScript:\n{}",
-                self.expression, self.source
+                self.expression,
+                Self::generated(&self.js),
             )
         })?;
         anyhow::ensure!(
@@ -201,7 +211,7 @@ impl Case {
             expected.rust,
             expected.javascript,
             self.rust,
-            self.source,
+            Self::generated(&self.js),
         );
         Ok(())
     }
@@ -275,15 +285,16 @@ macro_rules! coherent {
 
 #[cfg(test)]
 mod tests {
-    use topcoat::runtime::{Js, Surrogated};
+    use topcoat::runtime::{JsTemplate, Surrogated};
 
     use super::*;
 
     #[test]
     fn a_stalled_rust_future_is_an_execution_failure() {
+        static PENDING: JsTemplate = JsTemplate::new("(cx) => async () => new Promise(() => {})");
         let compiled = Expr::evaluate(
             || async || std::future::pending::<<f64 as Surrogated>::Surrogate>().await,
-            Js::source("async () => new Promise(() => {})"),
+            Js::template(&PENDING, Vec::new()),
         );
         let result =
             Case::asynchronous_with_timeout("pending forever", compiled, Duration::from_millis(10));
