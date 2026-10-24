@@ -124,6 +124,8 @@ Ok(view! {
 
 For operations outside the expression vocabulary, use a JavaScript string literal, such as `@click="alert('hi')"`.
 
+`@visible` is a synthetic event. It fires each time the element enters the viewport, for example to load the next page of a feed.
+
 Signals also have methods for common updates. For example, `$(|_e| count.increment())` adds one to a numeric signal.
 
 # Bind attributes
