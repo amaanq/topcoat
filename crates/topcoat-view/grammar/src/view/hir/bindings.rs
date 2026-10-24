@@ -1,4 +1,4 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote};
 use syn::{Expr, Ident, Pat, Token};
 use topcoat_core_grammar::paths::topcoat_view;
@@ -138,8 +138,9 @@ impl Bindings {
 /// A single bound identifier with the mutability of its binding.
 ///
 /// Its tokens are the rebinding pattern inside the view's body: the
-/// identifier keeps its span, so lints on the binding still point at the
-/// source pattern.
+/// identifier keeps its location, so lints on the binding still point at the
+/// source pattern. Call-site hygiene marks the rebinding as macro-generated,
+/// so Clippy's `shadow_*` lints skip it.
 pub(crate) struct Binding {
     mutability: Option<Token![mut]>,
     ident: Ident,
@@ -147,8 +148,10 @@ pub(crate) struct Binding {
 
 impl ToTokens for Binding {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let mut ident = self.ident.clone();
+        ident.set_span(ident.span().resolved_at(Span::call_site()));
         self.mutability.to_tokens(tokens);
-        self.ident.to_tokens(tokens);
+        ident.to_tokens(tokens);
     }
 }
 

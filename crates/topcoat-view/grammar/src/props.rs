@@ -235,13 +235,14 @@ impl ToTokens for Props {
                 quote! { #(#docs)* }
             };
 
-            let (param_ty, value) = if field.into {
+            let (generics, param_ty, value) = if field.into {
                 (
-                    quote!(impl ::core::convert::Into<#ty>),
+                    quote!(<__V: ::core::convert::Into<#ty>>),
+                    quote!(__V),
                     quote!(::core::convert::Into::into(#field_ident)),
                 )
             } else {
-                (quote!(#ty), quote!(#field_ident))
+                (TokenStream::new(), quote!(#ty), quote!(#field_ident))
             };
 
             // Required field: setting it flips its marker to `Set`, so the
@@ -257,7 +258,7 @@ impl ToTokens for Props {
                 let other_idents = field_idents.iter().filter(|other| **other != field_ident);
                 quote! {
                     #doc
-                    #vis fn #field_ident(self, #field_ident: #param_ty) -> #ret_ty {
+                    #vis fn #field_ident #generics(self, #field_ident: #param_ty) -> #ret_ty {
                         #builder_ident {
                             #field_ident: ::core::option::Option::Some(#value),
                             #(#other_idents: self.#other_idents,)*
@@ -269,7 +270,7 @@ impl ToTokens for Props {
                 // `#[default]` field: setting it does not change the typestate.
                 quote! {
                     #doc
-                    #vis fn #field_ident(mut self, #field_ident: #param_ty) -> Self {
+                    #vis fn #field_ident #generics(mut self, #field_ident: #param_ty) -> Self {
                         self.#field_ident = ::core::option::Option::Some(#value);
                         self
                     }
@@ -339,23 +340,15 @@ impl ToTokens for Props {
             }
 
             #[automatically_derived]
-            #[allow(dead_code)]
-            impl #impl_generics #ident #ty_generics #where_clause {
+            impl #impl_generics #topcoat_view::Props for #ident #ty_generics #where_clause {
+                type Builder = #unset_ty;
+
                 #[doc = #builder_fn_doc]
-                #vis fn builder() -> #unset_ty {
+                fn builder() -> Self::Builder {
                     #builder_ident {
                         #(#field_idents: ::core::option::Option::None,)*
                         #phantom_init
                     }
-                }
-            }
-
-            #[automatically_derived]
-            impl #impl_generics #topcoat_view::Props for #ident #ty_generics #where_clause {
-                type Builder = #unset_ty;
-
-                fn builder() -> Self::Builder {
-                    Self::builder()
                 }
             }
         }

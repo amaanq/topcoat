@@ -1,8 +1,7 @@
 /// A properties struct whose builder checks required fields at compile time.
 ///
-/// Implemented by [`#[derive(Props)]`][derive]. The derive also generates an
-/// inherent `builder()` function on the struct, so this trait only needs to be
-/// in scope when the builder is constructed generically.
+/// Implemented by [`#[derive(Props)]`][derive]. Bring the trait into scope to
+/// call `builder()` on the struct.
 ///
 /// [derive]: derive.Props.html
 pub trait Props {

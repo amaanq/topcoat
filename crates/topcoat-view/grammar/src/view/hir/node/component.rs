@@ -55,7 +55,10 @@ impl Component {
 impl Emit for Component {
     fn emit(&self, emitter: &mut Emitter) {
         let ident = emitter.fresh_ident();
-        let span = self.span;
+        // Call-site hygiene marks the bindings as macro-generated, so the
+        // shadowing between nested invocations stays out of Clippy's
+        // `shadow_*` lints on the caller's code.
+        let span = self.span.resolved_at(Span::call_site());
 
         let site = self.site();
         let path = &self.path;
